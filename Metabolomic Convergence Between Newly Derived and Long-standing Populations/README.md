@@ -1,1 +1,1 @@
-Scripts to run analysis assessing metabolomic convergence between newly derived and long-standing A-type (ACO and AO) and C-type (CO and nCO) populations. Input file can be found in the dryad directory associated with this project.
+Scripts to run analyses assessing metabolomic convergence between newly derived and long-standing A-type (ACO and AO) and C-type (CO and nCO) populations. Input file can be found in the dryad directory associated with this project.
