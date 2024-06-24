@@ -1,4 +1,4 @@
-setwd("C:/Users/huber/Box/Phillips Lab/Projects/A and C Metabolomic Trajectory Project/Linear Models/")
+
 library(lme4)
 library(car)
 library(dplyr)
