@@ -1,5 +1,3 @@
-setwd("C:/Users/huber/Box/Phillips Lab/Projects/A and C Metabolomic Trajectory Project/Manuscript/Githubcode/")
-
 library(lme4)
 library(car)
 library(dplyr)
