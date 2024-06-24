@@ -3,8 +3,6 @@ library(bit)
 
 ### Reading in File and Setting up
 
-setwd("/Users/zachary/Documents/Metabolomics Time Series")
-
 metabolomics <- read_excel("Metabolomics Raw Data.xlsx", sheet = "Relative Quant Data")
 metabolomicsSampleInfo <- read_excel("Metabolomics Raw Data.xlsx", sheet = "Sample Info")
 
