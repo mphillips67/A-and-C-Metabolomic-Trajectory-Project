@@ -4,4 +4,4 @@ Scripts used for manuscript tittled "Selection for early reproduction leads to a
 
 Major input and output files are available through Dryad (DOI: placehodler).
 
-If you have any questions, contact me at philmark@oregonstate.edu.
+If you have any questions, contact mysel (philmark@oregonstate.edu) or David Hubert (david.hubert@oregonstate.edu).
