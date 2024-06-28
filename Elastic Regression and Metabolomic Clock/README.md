@@ -1,1 +1,2 @@
+Scripts to create “clocks” that predict age based on metabolomic profiles using elastic regression, compare clocks built with different populations with linear models, and to analyze features used in clock models. Input file can be found in the dryad directory associated with this project.![image](https://github.com/mphillips67/A-and-C-Metabolomic-Trajectory-Project/assets/4704496/d006e8bb-6eb7-42c0-a413-68350aa16710)
 
