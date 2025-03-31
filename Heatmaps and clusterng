@@ -1,0 +1,353 @@
+#load necessary packages
+library(dplyr)
+library(pheatmap)
+library(tibble)
+library(tidyverse)
+library(magrittr)
+library(data.table)
+
+# Clear the global environment, but not the plots
+rm(list = ls(all.names = TRUE), envir = .GlobalEnv)
+
+#read in normalized data
+data <- read.csv("A-C Normalized Metabolomics Time Series Data.csv")
+
+#read in full naming information
+name_key <- read.csv("Pathway_naming_key.csv")
+
+# read in file with LMM results
+sigref <- read.csv("Mixed_effect_results_AC_metabolomics_First80samples.csv")
+
+#### fix formatting issues ####
+{# Replace "9" with "09" in the combined Day
+  data$Day <- gsub("9", "09", data$Day)
+  data$Day <- as.factor(data$Day)
+  #rename column heading
+  colnames(data)[colnames(data) == "SimpleSel"] <- "Selection"
+  #change capitalization of "type"
+  data$Selection <- gsub("Type", "type", data$Selection)
+}
+
+# Remove columns 1, 3, 4-6
+data <- data %>% select(-c(1, 3, 5:7))
+
+
+# Calculate the mean for columns 8 to n based on Selection and Day
+mean_values <- data %>%
+  group_by(Selection, Day) %>%
+  summarise(across(1:last_col(), \(x) mean(x, na.rm = TRUE)))
+
+# Create the new ID column
+mean_values$ID <- paste0(substr(mean_values$Selection, 1, 1), "_", mean_values$Day)
+
+# Reorder the columns to make ID the third column
+mean_values <- mean_values[, c(1, 2, ncol(mean_values), 3:(ncol(mean_values)-1))]
+
+
+# Reshape the data frame to long format
+long_mean <- mean_values %>%
+  pivot_longer(
+    cols = -c(1, 2, 3),  # Exclude Day and Selection columns dynamically
+    names_to = "Metabolite",
+    values_to = "Value"
+  )
+#Remove day and selection colunms
+long_mean <- long_mean[, -c(1, 2)]
+
+
+
+# Create a wide format where metabolites are rows and Day and Selection are columns
+wide_mean <- long_mean %>%
+  pivot_wider(
+    names_from = ID,
+    values_from = Value
+  ) %>%
+  column_to_rownames(var = "Metabolite") 
+
+#### All sig for any term ####
+# Filter sigref for Metabolites with >0.0 in any of the specified columns (so include all)
+metabolites_list <- sigref$Compound[sigref$Sel_fdr > 0.0 | 
+                                      sigref$Day_fdr > 0.0 | 
+                                      sigref$Interaction_fdr > 0.0]
+
+# Convert to a unique list if needed
+metabolites_list <- unique(metabolites_list)
+
+# Filter wide_mean based on row names that are in metabolites_list
+wide_mean_filtered <- wide_mean[rownames(wide_mean) %in% metabolites_list, ]
+
+
+#### rename metabolites with full names ####
+
+# Create a vector of matched expanded names, replacing NAs with the original names from metabolites_list
+matched_expanded_names <- name_key$ExpandedNames[match(metabolites_list, name_key$Metabolite)]
+
+# Replace NA values with the original names from metabolites_list
+matched_expanded_names[is.na(matched_expanded_names)] <- metabolites_list[is.na(matched_expanded_names)]
+
+# Assuming wide_mean_filtered has the same number of rows as matched_expanded_names
+rownames(wide_mean_filtered) <- matched_expanded_names
+
+# Modify the column names by removing the underscore
+colnames(wide_mean_filtered) <- gsub("(\\w)_(\\d{2})", "\\1\\2", colnames(wide_mean_filtered))
+
+#Write table to file with filtered mean values
+#write.csv(wide_mean_filtered,file = "MeanValues.csv", row.names = TRUE)
+
+
+# Extract row clusters (metabolite assignments)
+# Run pheatmap and store the output
+heatmap_result <- wide_mean_filtered %>%
+  as.matrix() %>%
+  pheatmap(cluster_cols = TRUE,
+           breaks = seq(-0.5, 0.5, length.out = 101),
+           fontsize_row = 5,
+           fontsize_col = 8,
+           treeheight_row = 80,
+           angle_col = 0,
+           cellwidth = 20,
+           cellheight = 7,
+           cutree_rows = 25,  # 25 row clusters
+           cutree_cols = 4,   # 4 column clusters
+           color = colorRampPalette(c("navy", "white", "firebrick"))(100))
+
+
+# Extract row clusters (metabolite assignments)
+metabolite_clusters <- data.frame(
+  Metabolite = rownames(wide_mean_filtered),
+  Cluster = cutree(heatmap_result$tree_row, k = 25) # Assigns each row to a cluster
+)
+
+# View the first few rows
+head(metabolite_clusters)
+
+#write.csv(metabolite_clusters,file = "Metabolite_clusters_full.csv", row.names = TRUE)
+
+
+# Extract row clusters
+metabolite_clusters <- data.frame(
+  Cluster = factor(cutree(heatmap_result$tree_row, k = 25)) # Convert to factor for labeling
+)
+rownames(metabolite_clusters) <- rownames(wide_mean_filtered) # Match row names
+
+# Re-run pheatmap with row annotations (clusters labeled, no extra color)
+pheatmap(wide_mean_filtered %>% as.matrix(),
+         cluster_cols = TRUE,
+         breaks = seq(-0.5, 0.5, length.out = 101),
+         fontsize_row = 5,
+         fontsize_col = 8,
+         treeheight_row = 80,
+         angle_col = 0,
+         cellwidth = 20,
+         cellheight = 7,
+         cutree_rows = 25,
+         cutree_cols = 4,
+         color = colorRampPalette(c("navy", "white", "firebrick"))(100),
+         annotation_row = metabolite_clusters,  # Add cluster numbers
+         show_rownames = TRUE,  # Keep metabolite names visible
+         annotation_names_row = FALSE)  # Remove the row cluster axis title
+
+
+
+##### new try with better coloring for clusters #####
+
+library(RColorBrewer)
+
+
+# Generate distinct colors for the clusters
+# Use Set3 palette for up to 12 colors, or create custom colors for more clusters
+cluster_colors <- brewer.pal(min(25, 12), "Set3")
+if (length(unique(metabolite_clusters$Cluster)) > 12) {
+  extra_colors <- colorRampPalette(brewer.pal(8, "Dark2"))(length(unique(metabolite_clusters$Cluster)) - 12)
+  cluster_colors <- c(cluster_colors, extra_colors)
+}
+
+# Create a named list for row annotations
+annotation_colors <- list(Cluster = setNames(cluster_colors, unique(metabolite_clusters$Cluster)))
+
+# Plot the heatmap with improved color distinction
+pheatmap(wide_mean_filtered %>% as.matrix(),
+         cluster_cols = TRUE,
+         breaks = seq(-0.5, 0.5, length.out = 101),
+         fontsize_row = 5,
+         fontsize_col = 8,
+         treeheight_row = 80,
+         angle_col = 0,
+         cellwidth = 20,
+         cellheight = 7,
+         cutree_rows = 25,
+         cutree_cols = 4,
+         color = colorRampPalette(c("navy", "white", "firebrick"))(100),
+         annotation_row = metabolite_clusters,
+         annotation_colors = annotation_colors,
+         show_rownames = TRUE,
+         annotation_names_row = FALSE)
+
+
+
+
+#### choosing the number of clusters #### 
+
+# Elbow method for k-means clustering 
+library(ggplot2)
+
+# Perform k-means clustering for a range of k values
+wss <- sapply(1:200, function(k) {
+  kmeans(wide_mean_filtered, centers = k, nstart = 25)$tot.withinss
+})
+
+
+# Calculate the differences between consecutive WSS values
+wss_diff <- diff(wss)
+
+# Calculate the second derivative (change in the rate of change)
+wss_diff2 <- diff(wss_diff)
+
+# Find the K value that corresponds to the largest second derivative (the elbow)
+optimal_k <- which.min(wss_diff2) + 1  # +1 because diff reduces the length by 1
+
+# Print the optimal K (27)
+optimal_k
+
+ideal_wss <- wss[optimal_k - 1]  # Adjust index if necessary
+
+ggplot(data.frame(k = 1:200, wss = wss), aes(x = k, y = wss)) +
+  geom_line() + 
+  geom_point() + 
+  theme_minimal() +
+  labs(title = "Elbow Method for Optimal Clusters", 
+       x = "Number of Clusters", y = "Within-cluster Sum of Squares") +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),  
+    axis.title = element_text(size = 14),                 
+    axis.text = element_text(size = 12)                   
+  ) +
+  # Add a vertical line at the ideal k
+  geom_vline(xintercept = optimal_k, linetype = "dashed", color = "red") +
+  # Add a label for the ideal k
+  geom_text(aes(x = optimal_k, y = ideal_wss, label = paste("k =", optimal_k)), 
+            color = "red", vjust = -1, hjust = -0.5, size = 5)
+
+
+
+
+
+
+
+
+
+#### create heatmap with just the one cluster of interest ####
+
+# Add a new column 'metabolite' that copies the row names
+metabolite_clusters$metabolite <- rownames(metabolite_clusters)
+
+#  Create lists of metabolites by cluster of interest
+
+
+
+# Subset and get the metabolites for Cluster == 9
+clust_9 <- metabolite_clusters$metabolite[metabolite_clusters$Cluster == 9]
+
+# Display the result
+print(clust_9)
+
+clust_9 <- rownames(metabolite_clusters[which(metabolite_clusters$Cluster == 9), ])
+
+
+# Filter the wide_mean_filtered data frame
+filtered_data_9 <- wide_mean_filtered[rownames(wide_mean_filtered) %in% clust_9, ]
+
+# View the filtered data
+head(filtered_data_9)
+
+
+# Step 1: Perform clustering on the full dataset wide_mean_filtered
+# Get distance matrices for rows and columns
+row_dist_9 <- dist(as.matrix(wide_mean_filtered))
+col_dist_9 <- dist(t(as.matrix(wide_mean_filtered)))
+
+# Perform hierarchical clustering
+row_clust_9 <- hclust(row_dist_9)
+col_clust_9 <- hclust(col_dist_9)
+
+
+# Step 3: Generate the heatmap for the filtered data, using the clustering from wide_mean_filtered
+filtered_data_9 %>%
+  {invisible(cat("Number of metabolites:", nrow(.), "\n")); .} %>%
+  as.matrix() %>%
+  pheatmap(cluster_cols = col_clust_9,  # Use hclust object for column clustering
+           cluster_rows = FALSE,  # let rows cluster
+           breaks = seq(-0.5, 0.5, length.out = 101),
+           fontsize_row = 8,
+           fontsize_col = 8,
+           treeheight_row = 30,
+           treeheight_col = 30,
+           angle_col = 0,
+           cellwidth = 20,
+           cellheight = 10,
+           cutree_rows = 2,
+           cutree_cols = 4,
+           color = colorRampPalette(c("navy", "white", "firebrick"))(100))
+
+
+
+#### Create a compound panel with all the clusters of interest ####
+library(grid)
+library(gridExtra)
+library(pheatmap)
+
+# List of clusters you want to generate heatmaps for
+clusters <- c(9, 10, 2, 22, 6) # set the order of these so that they sit nicely in the figure
+
+# Create an empty list to store the heatmap objects
+heatmap_list <- list()
+
+# Loop through each cluster number
+for (cluster_num in clusters) {
+  
+  # Subset and get the metabolites for the current cluster
+  clust_metabolites <- metabolite_clusters$metabolite[metabolite_clusters$Cluster == cluster_num]
+  
+  # Filter the wide_mean_filtered data frame
+  filtered_data <- wide_mean_filtered[rownames(wide_mean_filtered) %in% clust_metabolites, ]
+  
+  # Perform clustering on the full dataset wide_mean_filtered
+  row_dist <- dist(as.matrix(wide_mean_filtered))
+  col_dist <- dist(t(as.matrix(wide_mean_filtered)))
+  
+  # Perform hierarchical clustering
+  row_clust <- hclust(row_dist)
+  col_clust <- hclust(col_dist)
+  
+  # Generate the heatmap for the filtered data
+  heatmap_obj <- filtered_data %>%
+    {invisible(cat("Number of metabolites:", nrow(.), "\n")); .} %>%
+    as.matrix() %>%
+    pheatmap(cluster_cols = col_clust,  # Use hclust object for column clustering
+             cluster_rows = TRUE,  # let rows cluster
+             breaks = seq(-0.5, 0.5, length.out = 101),
+             fontsize_row = 8,
+             fontsize_col = 8,
+             treeheight_row = 30,
+             treeheight_col = 30,
+             angle_col = 0,
+             cellwidth = 20,
+             cellheight = 10,
+             cutree_rows = 1,
+             cutree_cols = 4,
+             color = colorRampPalette(c("navy", "white", "firebrick"))(100),
+             silent = TRUE)  # Suppress direct output
+  
+  # Extract the gtable object from the heatmap
+  gtable_obj <- heatmap_obj$gtable
+  
+  # Add annotation with cluster number at the bottom
+  grid.text(paste("Cluster", cluster_num), x = 0.5, y = -0.05, gp = gpar(fontsize = 12))
+  
+  # Store the gtable object in the list
+  heatmap_list[[as.character(cluster_num)]] <- gtable_obj
+}
+
+# Combine all heatmaps into a single figure using grid.arrange
+grid.arrange(grobs = heatmap_list, ncol = 3)
+
